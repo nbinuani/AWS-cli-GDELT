@@ -1,0 +1,103 @@
+﻿{
+  "metadata": {
+    "name": "2020_Projet GDELT_Download",
+    "kernelspec": {
+      "language": "scala",
+      "name": "spark2-scala"
+    },
+    "language_info": {
+      "codemirror_mode": "text/x-scala",
+      "file_extension": ".scala",
+      "mimetype": "text/x-scala",
+      "name": "scala",
+      "pygments_lexer": "scala"
+    }
+  },
+  "nbformat": 4,
+  "nbformat_minor": 2,
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": "## 1. Download S3"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 1,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "import sys.process._\nimport java.net.URL\nimport java.io.File\nimport java.io.File\nimport java.nio.file.{Files, StandardCopyOption}\nimport java.net.HttpURLConnection \nimport org.apache.spark.sql.functions._\n\n// Fonction fileDownloader\n\ndef fileDownloader(urlOfFileToDownload: String, fileName: String) \u003d {\n    val url \u003d new URL(urlOfFileToDownload)\n    val connection \u003d url.openConnection().asInstanceOf[HttpURLConnection]\n    connection.setConnectTimeout(5000)\n    connection.setReadTimeout(5000)\n    connection.connect()\n\n    if (connection.getResponseCode \u003e\u003d 400)\n        println(\"error\")\n    else\n        url #\u003e new File(fileName) !!\n}"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 2,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "// Configuration de l\u0027accès au bucket S3\n\nimport com.amazonaws.services.s3.AmazonS3Client\nimport com.amazonaws.auth.BasicAWSCredentials\n    \nval AWS_ID \u003d \"ASIA42MK5CSXKVCHJXK6\"\nval AWS_KEY \u003d \"zoL8KB0/Ayil2q5hgct9FUSoGEXZfvQ+egNVIBo0\"\n// la classe AmazonS3Client n\u0027est pas serializable\n// on rajoute l\u0027annotation @transient pour dire a Spark de ne pas essayer de serialiser cette classe et l\u0027envoyer aux executeurs\n@transient val awsClient \u003d new AmazonS3Client(new BasicAWSCredentials(AWS_ID, AWS_KEY))\n\nsc.hadoopConfiguration.set(\"fs.s3a.access.key\", AWS_ID) // mettre votre ID du fichier credentials.csv\nsc.hadoopConfiguration.set(\"fs.s3a.secret.key\", AWS_KEY) // mettre votre secret du fichier credentials.csv\n\n\n"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 3,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "// Téléchargement du fichier masterfilelist.txt et masterfilelist_translation.txt\n\nfileDownloader(\"http://data.gdeltproject.org/gdeltv2/masterfilelist.txt\", \"/tmp/masterfilelist.txt\")\nfileDownloader(\"http://data.gdeltproject.org/gdeltv2/masterfilelist-translation.txt\", \"/tmp/masterfilelist_translation.txt\") \n\nawsClient.putObject(\"delin-jia-telecom-msbgd2020\", \"masterfilelist.txt\", new File( \"/tmp/masterfilelist.txt\") )\nawsClient.putObject(\"delin-jia-telecom-msbgd2020\", \"masterfilelist_translation.txt\", new File( \"/tmp/masterfilelist_translation.txt\") )"
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": " Verifions que le fichier a bien ete uploade dans le bucket S3 via un dataframe Spark"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 5,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "// Conversion du fichier masterfilelist.txt en Data Frame\n\nimport org.apache.spark.sql.SQLContext\n\nval sqlContext \u003d new SQLContext(sc)\n\n\n                    \nval filesDF_eng \u003d sqlContext.read.\n                    option(\"delimiter\",\" \").\n                    option(\"infer_schema\",\"true\").\n                    csv(\"s3a://delin-jia-telecom-msbgd2020/masterfilelist.txt\").\n                    withColumnRenamed(\"_c0\",\"size\").\n                    withColumnRenamed(\"_c1\",\"hash\").\n                    withColumnRenamed(\"_c2\",\"url\").\n                    cache\n\n//DF pour masterfilelist-translation                  \nval filesDF_translate \u003d sqlContext.read.\n                    option(\"delimiter\",\" \").\n                    option(\"infer_schema\",\"true\").\n                    csv(\"s3a://delin-jia-telecom-msbgd2020/masterfilelist-translation.txt\").\n                    withColumnRenamed(\"_c0\",\"size\").\n                    withColumnRenamed(\"_c1\",\"hash\").\n                    withColumnRenamed(\"_c2\",\"url\").\n                    cache\n\n\n//concaténation des 2 fichiers                    \nval filesDF \u003d filesDF_eng.union(filesDF_translate)\n                    \n                    \n\n"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 6,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "filesDF.show(false)"
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": " Par la suite on va charger uniquement les fichiers qui correspond à 2020 1ere octobre"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 8,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "val sampleDF \u003d filesDF.filter(col(\"url\").contains(\"/20201001\")).cache\n\nsampleDF.show(false)"
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": " Nous allons charger tous ces fichiers dans le bucket S3 via un ETL Spark:"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 10,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "object AwsClient{\n    val s3 \u003d new AmazonS3Client(new BasicAWSCredentials(AWS_ID, AWS_KEY))\n}\n\n\nsampleDF.select(\"url\").repartition(100).foreach( r\u003d\u003e {\n            val URL \u003d r.getAs[String](0)\n            val fileName \u003d r.getAs[String](0).split(\"/\").last\n            val dir \u003d \"/tmp/\"\n            val localFileName \u003d dir + fileName\n            fileDownloader(URL,  localFileName)\n            val localFile \u003d new File(localFileName)\n            AwsClient.s3.putObject(\"delin-jia-telecom-msbgd2020\", fileName, localFile )\n            localFile.delete()\n            \n})"
+    }
+  ]
+}

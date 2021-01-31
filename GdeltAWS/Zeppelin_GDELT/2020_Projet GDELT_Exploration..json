@@ -1,0 +1,328 @@
+﻿{
+  "metadata": {
+    "name": "2020_Projet GDELT_Exploration",
+    "kernelspec": {
+      "language": "scala",
+      "name": "spark2-scala"
+    },
+    "language_info": {
+      "codemirror_mode": "text/x-scala",
+      "file_extension": ".scala",
+      "mimetype": "text/x-scala",
+      "name": "scala",
+      "pygments_lexer": "scala"
+    }
+  },
+  "nbformat": 4,
+  "nbformat_minor": 2,
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": "## 2. Data Pre-processing"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 1,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "import sys.process._\nimport java.net.URL\nimport java.io.File\nimport java.io.File\nimport java.nio.file.{Files, StandardCopyOption}\nimport java.net.HttpURLConnection \nimport org.apache.spark.sql.functions._\n\nimport org.apache.spark.sql.SQLContext\nimport org.apache.spark.input.PortableDataStream\nimport java.util.zip.ZipInputStream\nimport java.io.BufferedReader\nimport java.io.InputStreamReader\n\nimport com.amazonaws.services.s3.AmazonS3Client\nimport com.amazonaws.auth.BasicAWSCredentials\n\nimport com.datastax.spark.connector.cql.CassandraConnector\nimport org.apache.spark.sql.cassandra._\n"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 2,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "\nval AWS_ID \u003d \"XXX\"\nval AWS_KEY \u003d \"XXX\"\n// la classe AmazonS3Client n\u0027est pas serializable\n// on rajoute l\u0027annotation @transient pour dire a Spark de ne pas essayer de serialiser cette classe et l\u0027envoyer aux executeurs\n@transient val awsClient \u003d new AmazonS3Client(new BasicAWSCredentials(AWS_ID, AWS_KEY))\n\nsc.hadoopConfiguration.set(\"fs.s3a.access.key\", AWS_ID) // mettre votre ID du fichier credentials.csv\nsc.hadoopConfiguration.set(\"fs.s3a.secret.key\", AWS_KEY) // mettre votre secret du fichier credentials.csv\n"
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": " \n### 2.a  EVENT"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 4,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "// Décompression des fichiers et transformation en Data Frame\n\nval textRDD_eng \u003d sc.binaryFiles(\"s3a://delin-jia-telecom-msbgd2020/20201001[0-9]*.export.CSV.zip\").\n   flatMap { \n       case (name: String, content: PortableDataStream) \u003d\u003e\n          val zis \u003d new ZipInputStream(content.open)\n          Stream.continually(zis.getNextEntry).\n                takeWhile(_ !\u003d null).\n                flatMap { _ \u003d\u003e\n                    val br \u003d new BufferedReader(new InputStreamReader(zis))\n                    Stream.continually(br.readLine()).takeWhile(_ !\u003d null)\n                }\n    }\n    \n    \n//exporter fichiers issus de masterfilelist-translation.txt\nval textRDD_translate \u003d sc.binaryFiles(\"s3a://delin-jia-telecom-msbgd2020/20201001[0-9]*.translation.export.CSV.zip\"). \n   flatMap {  // decompresser les fichiers\n       case (name: String, content: PortableDataStream) \u003d\u003e\n          val zis \u003d new ZipInputStream(content.open)\n          Stream.continually(zis.getNextEntry).\n                takeWhile(_ !\u003d null).\n                flatMap { _ \u003d\u003e\n                    val br \u003d new BufferedReader(new InputStreamReader(zis))\n                    Stream.continually(br.readLine()).takeWhile(_ !\u003d null)\n                }\n    }\n    \n\n"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 5,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "// Union des datasets en anglais et autres langues\n\nval eventDF \u003d textRDD_eng.union(textRDD_translate).toDF()\n.withColumn(\"GLOBALEVENTID\", split($\"value\", \"\\\\t\").getItem(0))\n.withColumn(\"Day\", split($\"value\", \"\\\\t\").getItem(1))\n.withColumn(\"MonthYear\", split($\"value\", \"\\\\t\").getItem(2))\n.withColumn(\"Year\", split($\"value\", \"\\\\t\").getItem(3))\n.withColumn(\"FractionDate\", split($\"value\", \"\\\\t\").getItem(4))\n.withColumn(\"Actor1Code\", split($\"value\", \"\\\\t\").getItem(5))\n.withColumn(\"Actor1Name\", split($\"value\", \"\\\\t\").getItem(6))\n.withColumn(\"Actor1CountryCode\", split($\"value\", \"\\\\t\").getItem(7))\n.withColumn(\"Actor1KnownGroupCode\", split($\"value\", \"\\\\t\").getItem(8))\n.withColumn(\"Actor1EthnicCode\", split($\"value\", \"\\\\t\").getItem(9))\n.withColumn(\"Actor1Religion1Code\", split($\"value\", \"\\\\t\").getItem(10))\n.withColumn(\"Actor1Religion2Code\", split($\"value\", \"\\\\t\").getItem(11))\n.withColumn(\"Actor1Type1Code\", split($\"value\", \"\\\\t\").getItem(12))\n.withColumn(\"Actor1Type2Code\", split($\"value\", \"\\\\t\").getItem(13))\n.withColumn(\"Actor1Type3Code\", split($\"value\", \"\\\\t\").getItem(14))\n.withColumn(\"Actor2Code\", split($\"value\", \"\\\\t\").getItem(15))\n.withColumn(\"Actor2Name\", split($\"value\", \"\\\\t\").getItem(16))\n.withColumn(\"Actor2CountryCode\", split($\"value\", \"\\\\t\").getItem(17))\n.withColumn(\"Actor2KnownGroupCode\", split($\"value\", \"\\\\t\").getItem(18))\n.withColumn(\"Actor2EthnicCode\", split($\"value\", \"\\\\t\").getItem(19))\n.withColumn(\"Actor2Religion1Code\", split($\"value\", \"\\\\t\").getItem(20))\n.withColumn(\"Actor2Religion2Code\", split($\"value\", \"\\\\t\").getItem(21))\n.withColumn(\"Actor2Type1Code\", split($\"value\", \"\\\\t\").getItem(22))\n.withColumn(\"Actor2Type2Code\", split($\"value\", \"\\\\t\").getItem(23))\n.withColumn(\"Actor2Type3Code\", split($\"value\", \"\\\\t\").getItem(24))\n.withColumn(\"IsRootEvent\", split($\"value\", \"\\\\t\").getItem(25))\n.withColumn(\"EventCode\", split($\"value\", \"\\\\t\").getItem(26))\n.withColumn(\"EventBaseCode\", split($\"value\", \"\\\\t\").getItem(27))\n.withColumn(\"EventRootCode\", split($\"value\", \"\\\\t\").getItem(28))\n.withColumn(\"QuadClass\", split($\"value\", \"\\\\t\").getItem(29))\n.withColumn(\"GoldsteinScale\", split($\"value\", \"\\\\t\").getItem(30))\n.withColumn(\"NumMentions\", split($\"value\", \"\\\\t\").getItem(31))\n.withColumn(\"NumSources\", split($\"value\", \"\\\\t\").getItem(32))\n.withColumn(\"NumArticles\", split($\"value\", \"\\\\t\").getItem(33))\n.withColumn(\"AvgTone\", split($\"value\", \"\\\\t\").getItem(34))\n.withColumn(\"Actor1Geo_Type\", split($\"value\", \"\\\\t\").getItem(35))\n.withColumn(\"Actor1Geo_FullName\", split($\"value\", \"\\\\t\").getItem(36))\n.withColumn(\"Actor1Geo_CountryCode\", split($\"value\", \"\\\\t\").getItem(37))\n.withColumn(\"Actor1Geo_ADM1Code\", split($\"value\", \"\\\\t\").getItem(38))\n.withColumn(\"Actor1Geo_ADM2Code\", split($\"value\", \"\\\\t\").getItem(39))\n.withColumn(\"Actor1Geo_Lat\", split($\"value\", \"\\\\t\").getItem(40))\n.withColumn(\"Actor1Geo_Long\", split($\"value\", \"\\\\t\").getItem(41))\n.withColumn(\"Actor1Geo_FeatureID\", split($\"value\", \"\\\\t\").getItem(42))\n.withColumn(\"Actor2Geo_Type\", split($\"value\", \"\\\\t\").getItem(43))\n.withColumn(\"Actor2Geo_FullName\", split($\"value\", \"\\\\t\").getItem(44))\n.withColumn(\"Actor2Geo_CountryCode\", split($\"value\", \"\\\\t\").getItem(45))\n.withColumn(\"Actor2Geo_ADM1Code\", split($\"value\", \"\\\\t\").getItem(46))\n.withColumn(\"Actor2Geo_ADM2Code\", split($\"value\", \"\\\\t\").getItem(47))\n.withColumn(\"Actor2Geo_Lat\", split($\"value\", \"\\\\t\").getItem(48))\n.withColumn(\"Actor2Geo_Long\", split($\"value\", \"\\\\t\").getItem(49))\n.withColumn(\"Actor2Geo_FeatureID\", split($\"value\", \"\\\\t\").getItem(50))\n.withColumn(\"ActionGeo_Type\", split($\"value\", \"\\\\t\").getItem(51))\n.withColumn(\"ActionGeo_FullName\", split($\"value\", \"\\\\t\").getItem(52))\n.withColumn(\"ActionGeo_CountryCode\", split($\"value\", \"\\\\t\").getItem(53))\n.withColumn(\"ActionGeo_ADM1Code\", split($\"value\", \"\\\\t\").getItem(54))\n.withColumn(\"ActionGeo_ADM2Code\", split($\"value\", \"\\\\t\").getItem(55))\n.withColumn(\"ActionGeo_Lat\", split($\"value\", \"\\\\t\").getItem(56))\n.withColumn(\"ActionGeo_Long\", split($\"value\", \"\\\\t\").getItem(57))\n.withColumn(\"ActionGeo_FeatureID\", split($\"value\", \"\\\\t\").getItem(58))\n.withColumn(\"DATEADDED\", split($\"value\", \"\\\\t\").getItem(59))\n.withColumn(\"SOURCEURL\", split($\"value\", \"\\\\t\").getItem(60))\n.drop($\"value\")"
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": " \n### 2.b  GKG"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 7,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "// Décompression des fichiers et transformation en Data Frame\n\nval gkgRDD_eng \u003d sc.binaryFiles(\"s3a://delin-jia-telecom-msbgd2020/20201001[0-9]*.gkg.CSV.zip\").\n   flatMap { \n       case (name: String, content: PortableDataStream) \u003d\u003e\n          val zis \u003d new ZipInputStream(content.open)\n          Stream.continually(zis.getNextEntry).\n                takeWhile(_ !\u003d null).\n                flatMap { _ \u003d\u003e\n                    val br \u003d new BufferedReader(new InputStreamReader(zis))\n                    Stream.continually(br.readLine()).takeWhile(_ !\u003d null)\n                }\n    }\n    \n    \n//exporter fichiers issus de masterfilelist-translation.txt\nval gkgRDD_translate \u003d sc.binaryFiles(\"s3a://delin-jia-telecom-msbgd2020/20201001[0-9]*.translation.gkg.CSV.zip\"). \n   flatMap {  // decompresser les fichiers\n       case (name: String, content: PortableDataStream) \u003d\u003e\n          val zis \u003d new ZipInputStream(content.open)\n          Stream.continually(zis.getNextEntry).\n                takeWhile(_ !\u003d null).\n                flatMap { _ \u003d\u003e\n                    val br \u003d new BufferedReader(new InputStreamReader(zis))\n                    Stream.continually(br.readLine()).takeWhile(_ !\u003d null)\n                }\n    }\n    \n\n// Union des datasets en anglais et autres langues\n\nval gkgDF \u003d gkgRDD_eng.union(gkgRDD_translate).toDF()\n.withColumn(\"GKGRECORDID\", split($\"value\", \"\\\\t\").getItem(0))\n.withColumn(\"DATE\", split($\"value\", \"\\\\t\").getItem(1))\n.withColumn(\"SourceCollectionIdentifier\", split($\"value\", \"\\\\t\").getItem(2))\n.withColumn(\"SourceCommonName\", split($\"value\", \"\\\\t\").getItem(3))\n.withColumn(\"DocumentIdentifier\", split($\"value\", \"\\\\t\").getItem(4))\n.withColumn(\"Counts\", split($\"value\", \"\\\\t\").getItem(5))\n.withColumn(\"V2Counts\", split($\"value\", \"\\\\t\").getItem(6))\n.withColumn(\"Themes\", split($\"value\", \"\\\\t\").getItem(7))\n.withColumn(\"V2Themes\", split($\"value\", \"\\\\t\").getItem(8))\n.withColumn(\"Locations\", split($\"value\", \"\\\\t\").getItem(9))\n.withColumn(\"V2Locations\", split($\"value\", \"\\\\t\").getItem(10))\n.withColumn(\"Persons\", split($\"value\", \"\\\\t\").getItem(11))\n.withColumn(\"V2Persons\", split($\"value\", \"\\\\t\").getItem(12))\n.withColumn(\"Organizations\", split($\"value\", \"\\\\t\").getItem(13))\n.withColumn(\"V2Organizations\", split($\"value\", \"\\\\t\").getItem(14))\n.withColumn(\"V2Tone\", split($\"value\", \"\\\\t\").getItem(15))\n.withColumn(\"Dates\", split($\"value\", \"\\\\t\").getItem(16))\n.withColumn(\"GCAM\", split($\"value\", \"\\\\t\").getItem(17))\n.withColumn(\"SharingImage\", split($\"value\", \"\\\\t\").getItem(18))\n.withColumn(\"RelatedImages\", split($\"value\", \"\\\\t\").getItem(19))\n.withColumn(\"SocialImageEmbeds\", split($\"value\", \"\\\\t\").getItem(20))\n.withColumn(\"SocialVideoEmbeds\", split($\"value\", \"\\\\t\").getItem(21))\n.withColumn(\"Quotations\", split($\"value\", \"\\\\t\").getItem(22))\n.withColumn(\"AllNames\", split($\"value\", \"\\\\t\").getItem(23))\n.withColumn(\"Amounts\", split($\"value\", \"\\\\t\").getItem(24))\n.withColumn(\"TranslationInfo\", split($\"value\", \"\\\\t\").getItem(25))\n.withColumn(\"Extras\", split($\"value\", \"\\\\t\").getItem(26))\n.drop($\"value\")"
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": " \n### 2.c  MENTIONS"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 9,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "// Décompression des fichiers et transformation en Data Frame\n\nval mentionRDD_eng \u003d sc.binaryFiles(\"s3a://delin-jia-telecom-msbgd2020/20201001[0-9]*.mentions.CSV.zip\").\n   flatMap { \n       case (name: String, content: PortableDataStream) \u003d\u003e\n          val zis \u003d new ZipInputStream(content.open)\n          Stream.continually(zis.getNextEntry).\n                takeWhile(_ !\u003d null).\n                flatMap { _ \u003d\u003e\n                    val br \u003d new BufferedReader(new InputStreamReader(zis))\n                    Stream.continually(br.readLine()).takeWhile(_ !\u003d null)\n                }\n    }\n    \n    \n//exporter fichiers issus de masterfilelist-translation.txt\nval mentionRDD_translate \u003d sc.binaryFiles(\"s3a://delin-jia-telecom-msbgd2020/20201001[0-9]*.translation.mentions.CSV.zip\"). \n   flatMap {  // decompresser les fichiers\n       case (name: String, content: PortableDataStream) \u003d\u003e\n          val zis \u003d new ZipInputStream(content.open)\n          Stream.continually(zis.getNextEntry).\n                takeWhile(_ !\u003d null).\n                flatMap { _ \u003d\u003e\n                    val br \u003d new BufferedReader(new InputStreamReader(zis))\n                    Stream.continually(br.readLine()).takeWhile(_ !\u003d null)\n                }\n    }\n    \n"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 10,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "//concaténer les RDD et transformer en DataFrame\nval mentionDF \u003d mentionRDD_eng.union(mentionRDD_translate).toDF()\n.withColumn(\"GLOBALEVENTID\", split($\"value\", \"\\\\t\").getItem(0))\n.withColumn(\"EventTimeDate\", split($\"value\", \"\\\\t\").getItem(1))\n.withColumn(\"MentionTimeDate\", split($\"value\", \"\\\\t\").getItem(2))\n.withColumn(\"MentionType\", split($\"value\", \"\\\\t\").getItem(3))\n.withColumn(\"MentionSourceName\", split($\"value\", \"\\\\t\").getItem(4))\n.withColumn(\"MentionIdentifier\", split($\"value\", \"\\\\t\").getItem(5))\n.withColumn(\"SentenceID\", split($\"value\", \"\\\\t\").getItem(6))\n.withColumn(\"Actor1CharOffset\", split($\"value\", \"\\\\t\").getItem(7))\n.withColumn(\"Actor2CharOffset\", split($\"value\", \"\\\\t\").getItem(8))\n.withColumn(\"ActionCharOffset\", split($\"value\", \"\\\\t\").getItem(9))\n.withColumn(\"InRawText\", split($\"value\", \"\\\\t\").getItem(10))\n.withColumn(\"Confidence\", split($\"value\", \"\\\\t\").getItem(11))\n.withColumn(\"MentionDocLen\", split($\"value\", \"\\\\t\").getItem(12))\n.withColumn(\"MentionDocTone\", split($\"value\", \"\\\\t\").getItem(13))\n.withColumn(\"MentionDocTranslationInfo\", split($\"value\", \"\\\\t\").getItem(14))\n.withColumn(\"Extras\", split($\"value\", \"\\\\t\").getItem(15))\n.withColumn(\"Langue_1\", when (col(\"MentionDocTranslationInfo\") \u003d\u003d\u003d \"\", \":eng\").otherwise(col(\"MentionDocTranslationInfo\")))    \n.withColumn(\"Langue_2\", split($\"Langue_1\", \";\").getItem(0))\n.withColumn(\"Langue\", split($\"Langue_2\", \":\").getItem(1))\n.drop($\"Langue_1\")\n.drop($\"Langue_2\")\n.drop($\"value\")"
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": "### 3. REQUETES"
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": "### 1. afficher le nombre d’articles/évènements qui parlent de COVID qu’il y a eu pour chaque triplet (jour, pays de l’évènement, langue de l’article)"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 13,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "val eventDF_selected  \u003d eventDF.select(\"GLOBALEVENTID\",\"Day\",\"MonthYear\",\"Year\",\"ActionGeo_CountryCode\").cache()\n\nval mentionDF_selected \u003d mentionDF.select(\"GLOBALEVENTID\",\"EventTimeDate\",\"MentionTimeDate\",\"MentionSourceName\",\"MentionIdentifier\",\"MentionDocTranslationInfo\",\"Langue\").cache()\n\n \n//JOIN eventDF_selected with mentionDF_selected ON GLOBALEVENTID   \nval event_mention_DF \u003d eventDF_selected.join(mentionDF_selected,\"GlobalEventID\").cache()     \n"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 14,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "val q1 \u003d event_mention_DF\n.filter(col(\"MentionIdentifier\").contains(\"COVID\"))\n.groupBy(\"ActionGeo_CountryCode\", \"Day\", \"Langue\", \"GLOBALEVENTID\")\n.agg(countDistinct($\"MentionIdentifier\") as \"nombre_articles\")\n.sort($\"nombre_articles\".desc)\n\nval q1_DF \u003d q1.select(\"GLOBALEVENTID\", \"Day\", \"ActionGeo_CountryCode\", \"Langue\", \"nombre_articles\")\n.withColumnRenamed(\"Day\", \"jour\")\n.withColumnRenamed(\"ActionGeo_CountryCode\", \"pays\")                                                                             //FIPS10-4 \n.withColumnRenamed(\"Langue\", \"langue_article\")\n.withColumnRenamed(\"GLOBALEVENTID\", \"evenement\")\n"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 15,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "q1_DF.show()"
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": " \n### 2. pour un pays donné en paramètre, affichez les évènements qui y ont eu place triées par le nombre de mentions (tri décroissant); permettez une agrégation par jour/mois/année"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 17,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "val q2 \u003d event_mention_DF\n.select(\"ActionGeo_CountryCode\",\"Day\",\"MonthYear\",\"Year\",\"GLOBALEVENTID\")\n.groupBy(\"GLOBALEVENTID\", \"Day\", \"MonthYear\", \"Year\", \"ActionGeo_CountryCode\")\n.count()\n.sort($\"count\".desc)\n\nval q2_DF \u003d q2                                                     \n.withColumnRenamed(\"Day\", \"jour\")\n.withColumnRenamed(\"ActionGeo_CountryCode\", \"pays\")\n.withColumnRenamed(\"count\", \"nombre_mentions\")\n.withColumnRenamed(\"GLOBALEVENTID\", \"evenement\")\n"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 18,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "// test: pour un pay donne en parametre\n\nval q2\u003d question2DfFinal.filter(\"ActionGeo_CountryCode \u003d\u003d \u0027US\u0027\").show()"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 19,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "q2_DF.show()"
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": "### 3. pour une source de donnés passée en paramètre (gkg.SourceCommonName) affichez les thèmes, personnes, lieux dont les articles de cette sources parlent ainsi que le le nombre d’articles et le ton moyen des articles (pour chaque thème/personne/lieu); permettez une agrégation par jour/mois/année."
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 21,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "val gkgDF_selected \u003d gkgDF.select(\"GKGRECORDID\",\"DATE\",\"SourceCommonName\",\"DocumentIdentifier\",\"Themes\",\"Locations\",\n\"Persons\",\"V2Tone\").cache()"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 22,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "//Retraitement du format des colonnes\n\nval q3 \u003d gkgDF_selected.withColumn(\"tone\",substring_index($\"V2Tone\",\",\",1))\n                         .withColumn(\"year\",substring($\"DATE\",0,4).cast(\"Int\"))\n                         .withColumn(\"month-year\",substring($\"DATE\",0,6).cast(\"Int\"))\n                         .withColumn(\"date\",substring($\"DATE\",0,8).cast(\"Int\"))\n                         .filter(!($\"SourceCommonName\" \u003d\u003d\u003d \"\"))\n                         .withColumn(\"persons\",split(gkgDF_selected(\"Persons\"),\";\"))\n                         .withColumn(\"locations\",split(gkgDF_selected(\"Locations\"),\";\"))\n                         .withColumn(\"themes\",split(gkgDF_selected(\"Themes\"),\";\"))"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 23,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "val q3_persons \u003d q3.select($\"date\",$\"GKGRECORDID\",$\"SourceCommonName\",$\"tone\",explode_outer($\"persons\").as(\"persons_2\"))"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 24,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "val q3_locations \u003d q3.select($\"date\",$\"GKGRECORDID\",$\"SourceCommonName\",$\"tone\",explode_outer($\"locations\").as(\"locations_2\"))"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 25,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "val q3_themes \u003d q3.select($\"date\",$\"GKGRECORDID\",$\"SourceCommonName\",$\"tone\",explode_outer($\"themes\").as(\"themes_2\"))"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 26,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "val q3_DF_persons \u003d q3_persons.groupBy(\"date\",\"SourceCommonName\",\"persons_2\").agg(count($\"GKGRECORDID\").cast(\"int\").as(\"nombre_articles\"),avg($\"tone\").as(\"ton_moyen\"))\n\nval q3_DF_locations \u003d q3_locations.groupBy(\"date\",\"SourceCommonNamee\",\"locations_2\").agg(count($\"GKGRECORDID\").cast(\"int\").as(\"nombre_articles\"),avg($\"tone\").as(\"ton_moyen\"))\n\nval q3_DF_themes \u003d q3_themes.groupBy(\"date\",\"SourceCommonName\",\"themes_2\").agg(count($\"GKGRECORDID\").cast(\"int\").as(\"nombre_articles\"),avg($\"tone\").as(\"ton_moyen\"))"
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": "### 4. est-ce qu’on observe des patterns dans l’evolution qui pourraient nous permettre d’identifier la prochaine vague/pandemie"
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": "## 3.  Ecriture des dataframes dans Cassandra"
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": "### Création de la table 1"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 30,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "\nCassandraConnector(sc.getConf).withSessionDo { session \u003d\u003e\n      session.execute(\n          \"\"\"\n             DROP KEYSPACE gdelt;\n          \"\"\"\n          )\n      session.execute(\n          \"\"\"\n             CREATE KEYSPACE IF NOT EXISTS gdelt\n             WITH REPLICATION \u003d {\u0027class\u0027: \u0027SimpleStrategy\u0027, \u0027replication_factor\u0027: 3 };\n          \"\"\")\n          session.execute(\n          \"\"\"\n             CREATE TABLE IF NOT EXISTS gdelt.q1(\n                evenement int,\n                date text,\n                pays text,\n                langue_article text,\n                nombre_articles int,\n              PRIMARY KEY (date, langue_article, pays));\n          \"\"\"\n        )\n}\n\nq1_DF.write\n      .cassandraFormat(\"q1\", \"gdelt\")\n      .mode(org.apache.spark.sql.SaveMode.Overwrite)\n      .options(Map(\"confirm.truncate\" -\u003e \"true\"))\n      .save()\n      \nval req1 \u003d spark.read\n      .cassandraFormat(\"q1\", \"gdelt\")\n      .load()\n      \nreq1.createOrReplaceTempView(\"q1\")\n"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 31,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "z.show(spark.sql(\"\"\" SELECT * FROM q1 LIMIT 10 \"\"\"))"
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": "### Création de la table 2"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 33,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "CassandraConnector(sc.getConf).withSessionDo { session \u003d\u003e\n          session.execute (\n          \"\"\"\n             CREATE TABLE IF NOT EXISTS gdelt.q2(\n                jour int,\n                pays text,\n                evenement int,\n                nombre_mentions int,\n             PRIMARY KEY ((pays, evenement), nombre_mentions));\n          \"\"\"\n        )\n}\n\nq2_DF.write\n      .cassandraFormat(\"q2\", \"gdelt\")\n      .mode(org.apache.spark.sql.SaveMode.Overwrite)\n      .options(Map(\"confirm.truncate\" -\u003e \"true\"))\n      .save()\n      \nval req2 \u003d spark.read\n      .cassandraFormat(\"q2\", \"gdelt\")\n      .load()\n      \nreq2.createOrReplaceTempView(\"q2\")"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 34,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "z.show(spark.sql(\"\"\" SELECT * FROM q2 LIMIT 10 \"\"\"))\n"
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {},
+      "source": "### Création de la table 3"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 36,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "// TABLE REQUETE 3 PERSONS\n\nCassandraConnector(sc.getConf).withSessionDo { session \u003d\u003e\n          session.execute (\n          \"\"\"\n             CREATE TABLE IF NOT EXISTS gdelt.q3_persons(\n                date int,\n                SourceCommonName text,\n                persons_2 text,\n                nombre_articles int,\n                ton_moyen double,\n             PRIMARY KEY (SourceCommonName, date));\n          \"\"\"\n        )\n}\n\nq3_DF_persons.write\n      .cassandraFormat(\"q3_persons\", \"gdelt\")\n      .mode(org.apache.spark.sql.SaveMode.Overwrite)\n      .options(Map(\"confirm.truncate\" -\u003e \"true\"))\n      .save()\n      \nval req3_persons \u003d spark.read\n      .cassandraFormat(\"q3_persons\", \"gdelt\")\n      .load()\n      \nreq3_persons.createOrReplaceTempView(\"vue_req3_persons\")"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 37,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "// TABLE REQUETE 3 LOCATIONS\nCassandraConnector(sc.getConf).withSessionDo { session \u003d\u003e\n          session.execute (\n          \"\"\"\n             CREATE TABLE IF NOT EXISTS gdelt.q3_locations(\n                date int,\n                SourceCommonName text,\n                locations_2 text,\n                nombre_articles int,\n                ton_moyen double,\n             PRIMARY KEY (SourceCommonName, date));\n          \"\"\"\n        )\n}\n\nq3_DF_locations.write\n      .cassandraFormat(\"q3_locations\", \"gdelt\")\n      .mode(org.apache.spark.sql.SaveMode.Overwrite)\n      .options(Map(\"confirm.truncate\" -\u003e \"true\"))\n      .save()\n      \nval req3_locations \u003d spark.read\n      .cassandraFormat(\"q3_locations\", \"gdelt\")\n      .load()\n      \nreq3_locations.createOrReplaceTempView(\"vue_req3_locations\")\n"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 38,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "// TABLE REQUETE 3 THEMES\nCassandraConnector(sc.getConf).withSessionDo { session \u003d\u003e\n          session.execute(\n              \"\"\"\n              DROP TABLE gdelt.requete3_themes\n              \"\"\"\n              )\n          session.execute (\n          \"\"\"\n             CREATE TABLE IF NOT EXISTS gdelt.q3_themes(\n                date int,\n                SourceCommonName text,\n                themes_2 text,\n                nombre_articles int,\n                ton_moyen double,\n             PRIMARY KEY (SourceCommonName, date));\n          \"\"\"\n        )\n}\n\nq3_DF_themes.write\n      .cassandraFormat(\"q3_themes\", \"gdelt\")\n      .mode(org.apache.spark.sql.SaveMode.Overwrite)\n      .options(Map(\"confirm.truncate\" -\u003e \"true\"))\n      .save()\n      \nval req3_themes \u003d spark.read\n      .cassandraFormat(\"q3_themes\", \"gdelt\")\n      .load()\n      \nreq3_themes.createOrReplaceTempView(\"vue_req3_themes\")"
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 39,
+      "metadata": {
+        "autoscroll": "auto"
+      },
+      "outputs": [],
+      "source": "z.show(spark.sql(\"\"\" SELECT * FROM vue_req3_persons LIMIT 10 \"\"\"))"
+    }
+  ]
+}

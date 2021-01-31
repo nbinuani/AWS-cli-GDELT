@@ -1,0 +1,31 @@
+[
+  {
+    "Classification": "spark-defaults",
+    "Properties": {
+    "spark.dynamicAllocation.enabled": "true",
+    "spark.driver.memory":"5G",
+    "spark.executor.memory": "9542M",
+    "spark.executor.cores": "4"
+  }
+  }
+,
+  {
+    "Classification": "zeppelin-env",
+    "Configurations":[{
+    "Classification":"export",
+    "Properties":
+    {
+    "ZEPPELIN_MEM":"-Xmx5G"
+    }
+    }
+    ],
+    "Properties": {}
+  }
+,
+  {
+    "Classification": "emrfs-site",
+    "Properties": {
+      "fs.s3.maxConnections": "1000"
+    }
+  }
+]
