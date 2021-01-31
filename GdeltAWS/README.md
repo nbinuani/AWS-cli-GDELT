@@ -103,4 +103,4 @@ Go to your terminal and do :
   * https://www.gdeltproject.org
   
   
-  # *Enjoy !*# AWS-cli-GDELT
+  # *Enjoy !*
