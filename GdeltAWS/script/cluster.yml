@@ -1,0 +1,23 @@
+# cluster.yml
+# playbook for db cluster set up
+---
+- hosts: localhost
+  remote_user: root
+  vars :
+    cluster_type : "{{ type }}"
+    number_instances: "{{ nb_instance }}"
+    instance_type: "{{instance_type}}"
+
+  tasks:
+    - name: Launch type cluster
+      command: aws emr create-cluster --name "{{cluster_type}}-cluster" --release-label emr-5.32.0 --applications Name=Hadoop --ec2-attributes KeyName=gdeltKeyPair --instance-type "{{instance_type}}" --instance-count {{number_instances}} --use-default-roles
+      register: cluster_id
+
+    - name: Wait for cluster running state
+      command: aws emr wait cluster-running --cluster-id "{{ cluster_id.stdout | regex_findall("j-[A-Z0-9]{13}") | first}}"
+
+    - name: docker install on each instance
+      include_tasks: docker.yml
+      vars:
+        my_var: "{{ cluster_id }}"
+      with_sequence: start=0 end="{{number_instances}}"

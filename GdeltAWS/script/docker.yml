@@ -1,0 +1,26 @@
+# docker.yml
+# combine with cluster.yml
+# for each machine set up docker to facilitate db installation and other
+---
+  - debug:
+      msg: "Tasks on  {{ item }} instance of cluster"
+
+  - name: Get all Public dns node and ip private adress
+    command: aws emr list-instances --cluster-id "{{ cluster_id.stdout | regex_findall("j-[A-Z0-9]{13}") | first}}" --query Instances["{{ item }}"].PublicDnsName
+    register: public_dns_node
+
+  - name: Get all Public dns node and ip private adress
+    command: aws emr list-instances --cluster-id "{{ cluster_id.stdout | regex_findall("j-[A-Z0-9]{13}") | first}}" --query Instances["{{ item }}"].PrivateIpAddress
+    register: private_ip_adress_node
+
+  - name: Sudo update
+    command: ssh -o StrictHostKeyChecking=no -i ../secrets/gdeltKeyPair.pem hadoop@"{{ public_dns_node.stdout }}" sudo yum update -y
+
+  - name: Install docker
+    command: ssh -o StrictHostKeyChecking=no -i ../secrets/gdeltKeyPair.pem hadoop@"{{ public_dns_node.stdout }}" sudo yum install docker -y
+
+  - name: Start service docker
+    command: ssh -o StrictHostKeyChecking=no -i ../secrets/gdeltKeyPair.pem hadoop@"{{ public_dns_node.stdout }}" sudo service docker start
+
+  - name: Add hadoop user to docker group
+    command: ssh -o StrictHostKeyChecking=no -i ../secrets/gdeltKeyPair.pem hadoop@"{{ public_dns_node.stdout }}" sudo usermod -aG docker hadoop
