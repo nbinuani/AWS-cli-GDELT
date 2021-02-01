@@ -71,11 +71,11 @@ Go to your terminal and do :
   
   1. Add a new spark interpreter named it Spark-cassandra from spark interpeter group.
   
-  2.Add spark.cassandra.connection.host and set the docker cassandra ip address (You can use the below command on the cassandra master node to see all connection)
+  2. Add spark.cassandra.connection.host and set the docker cassandra ip address (You can use the below command on the cassandra master node to see all connection)
   
     docker network inspect bridge
        
-  3.Now add in dependency or maven zeppelin the follow artifact
+  3. Now add in dependency or maven zeppelin the follow artifact
   
     com.datastax.spark:spark-cassandra-connector-2.11:2.0.7
     
