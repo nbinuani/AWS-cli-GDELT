@@ -89,7 +89,7 @@ Go to your terminal and do :
   ## Example of architecture
  
   
-   ![Architecture example](images/Architecture_AWS.png)
+   ![Architecture example](GdeltAWS/images/Architecture_AWS.png)
   
   
   ##### Appendices
